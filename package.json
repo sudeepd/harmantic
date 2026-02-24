@@ -1,0 +1,21 @@
+{
+  "name": "harmantic",
+  "version": "0.1.0",
+  "description": "Record browser sessions and generate API tests",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "dev:safari": "wxt -b safari",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "build:safari": "wxt build -b safari",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "wxt": "^0.20.18",
+    "typescript": "^5.4.0"
+  }
+}

@@ -272,6 +272,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
         (msg) => { statusBar.textContent = msg; }
       );
       downloadFile(`test_session.${ext}`, code);
+      downloadFile("session.har", buildHar(entries));
       statusBar.textContent = `Done — ${recorder.getMarkers().length || "auto"} flows generated`;
     } catch (e) {
       statusBar.textContent = `Error: ${(e as Error).message}`;
@@ -311,6 +312,22 @@ function downloadFile(filename: string, content: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function buildHar(entries: { request: unknown; response: unknown; startedDateTime: string; time: number }[]): string {
+  const har = {
+    log: {
+      version: "1.2",
+      creator: { name: "Harmantic", version: "0.1.0" },
+      entries: entries.map(e => ({
+        startedDateTime: e.startedDateTime,
+        time: e.time,
+        request: e.request,
+        response: e.response,
+      })),
+    },
+  };
+  return JSON.stringify(har, null, 2);
 }
 
 function shortModel(model: string): string {

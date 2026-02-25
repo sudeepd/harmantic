@@ -1,4 +1,5 @@
 import type { Flow, Step, CrossFlowDep, GeneratorConfig } from "../types";
+import type { JwtAnalysis } from "../jwt_analyzer";
 
 export function renderJest(flows: Flow[], config: GeneratorConfig): string {
   const allCrossFlowDeps = flows.flatMap(f => f.crossFlowDeps ?? []);
@@ -20,24 +21,37 @@ export function renderJest(flows: Flow[], config: GeneratorConfig): string {
     );
   }
 
-  if (hasCrossFlow) {
+  const jwtAnalyses = config.jwtAnalyses ?? [];
+  const hasJwt = jwtAnalyses.length > 0;
+
+  if (hasCrossFlow || hasJwt) {
     lines.push(
       "// Shared state populated by producing tests, consumed by dependent tests",
       "// Tests must run in order (default Jest behaviour with --runInBand)",
-      "const sessionState: Record<string, string> = {};",
+      "const sessionState: Record<string, string | undefined> = {};",
+      "",
+    );
+  }
+
+  if (hasJwt) {
+    lines.push(
+      "function decodeJwt(token: string): Record<string, string> {",
+      "  const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');",
+      "  return JSON.parse(atob(payload));",
+      "}",
       "",
     );
   }
 
   for (let i = 0; i < flows.length; i++) {
-    lines.push(...renderFlow(flows[i], i, flows));
+    lines.push(...renderFlow(flows[i], i, flows, jwtAnalyses));
     lines.push("");
   }
 
   return lines.join("\n");
 }
 
-function renderFlow(flow: Flow, flowIndex: number, allFlows: Flow[]): string[] {
+function renderFlow(flow: Flow, flowIndex: number, allFlows: Flow[], jwtAnalyses: JwtAnalysis[]): string[] {
   const consumes = flow.crossFlowDeps ?? [];
   const produces = allFlows.flatMap(f => f.crossFlowDeps ?? []).filter(d => d.producedByFlow === flowIndex);
 
@@ -101,10 +115,23 @@ function renderFlow(flow: Flow, flowIndex: number, allFlows: Flow[]): string[] {
     for (const xdep of produces.filter(d => d.producedByStep === step.index)) {
       if (xdep.extractedFrom === "header.Location") {
         lines.push(`  sessionState["${xdep.stateKey}"] = ${varName}.headers.get("Location")!.split("/").pop()!;`);
+      } else if (xdep.extractedFrom.startsWith("jwt.")) {
+        // emitted in JWT block below
       } else {
         const path = xdep.extractedFrom.replace(/^body\./, "");
         lines.push(`  const xbody${step.index} = await ${varName}.json();`);
         lines.push(`  sessionState["${xdep.stateKey}"] = xbody${step.index}["${path}"];`);
+      }
+    }
+
+    // JWT decode + claim extraction
+    const jwtHere = jwtAnalyses.filter(j => j.flowIndex === flowIndex && j.stepIndex === step.index);
+    for (const jwt of jwtHere) {
+      lines.push(`  const _token${step.index} = (await ${varName}.json())["${jwt.tokenField}"];`);
+      lines.push(`  sessionState["${jwt.tokenField}"] = _token${step.index};`);
+      lines.push(`  const _claims${step.index} = decodeJwt(_token${step.index});`);
+      for (const claim of jwt.claims) {
+        lines.push(`  sessionState["${claim.stateKey}"] = _claims${step.index}["${claim.key}"]; // ${claim.key}`);
       }
     }
 

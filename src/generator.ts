@@ -2,6 +2,7 @@ import type { HarEntry, FlowMarker, Flow, Step, GeneratorConfig, NavigationEvent
 import { segmentByMarkers, segmentHeuristic } from "./segmentation";
 import { detectDependencies } from "./dependencies";
 import { detectCrossFlowDeps } from "./cross_flow";
+import { analyzeJwts, injectJwtDeps } from "./jwt_analyzer";
 import { segmentWithLlm, detectDependenciesWithLlm, enrichFlowWithLlm } from "./llm_pipeline";
 import { renderPytest } from "./renderers/pytest";
 import { renderJest } from "./renderers/jest";
@@ -28,7 +29,7 @@ export async function generateTests(
 
   // Use LLM segmentation only when no user markers provided
   const segments = markers.length === 0
-    ? await segmentWithLlm(filtered, heuristic, config.llm, config.navEvents, config.instructions)
+    ? await segmentWithLlm(filtered, heuristic, config.llm, config.navEvents)
     : heuristic;
 
   // 3. Build flows with heuristic dependency detection
@@ -49,6 +50,15 @@ export async function generateTests(
   // 4. Cross-flow dependency detection
   log("Detecting cross-flow dependencies…");
   detectCrossFlowDeps(flows);
+
+  // JWT claim injection (after cross-flow so JWT deps merge cleanly)
+  if (config.parseJwt) {
+    log("Analyzing JWT tokens…");
+    const jwtAnalyses = analyzeJwts(flows);
+    injectJwtDeps(flows, jwtAnalyses);
+    // Attach analyses to config for renderers to emit decode helpers
+    config.jwtAnalyses = jwtAnalyses;
+  }
 
   // 5. LLM passes: dependency detection + enrichment
   // Associate nav events with each flow by timestamp

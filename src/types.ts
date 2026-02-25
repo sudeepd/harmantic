@@ -67,6 +67,8 @@ export interface GeneratorConfig {
   baseUrl: string;
   format: OutputFormat;
   navEvents: NavigationEvent[];
+  parseJwt: boolean;
+  jwtAnalyses?: import("./jwt_analyzer").JwtAnalysis[];
   llm?: {
     model: string;
     apiKey: string;

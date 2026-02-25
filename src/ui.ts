@@ -133,6 +133,10 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
               <option value="playwright">Playwright</option>
             </select>
           </label>
+          <label class="row">
+            <input type="checkbox" id="setting-parse-jwt" />
+            Parse JWT tokens and add claims to data flow
+          </label>
           <label>LLM model
             <input type="text" id="setting-model" />
           </label>
@@ -160,10 +164,12 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
   const modelBadge = document.getElementById("model-badge")!;
   const modalBackdrop = document.getElementById("modal-backdrop")!;
   const settingFormat = document.getElementById("setting-format") as HTMLSelectElement;
+  const settingParseJwt = document.getElementById("setting-parse-jwt") as HTMLInputElement;
   const settingModel = document.getElementById("setting-model") as HTMLInputElement;
   const settingApiKey = document.getElementById("setting-api-key") as HTMLInputElement;
 
   settingFormat.value = settings.format;
+  settingParseJwt.checked = settings.parseJwt;
   settingModel.value = settings.model;
   settingApiKey.value = settings.apiKey;
 
@@ -245,6 +251,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
     }
 
     settings.format = settingFormat.value as Settings["format"];
+    settings.parseJwt = settingParseJwt.checked;
     settings.model = newModel;
     settings.apiKey = newKey;
     await saveSettings(settings);
@@ -270,6 +277,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
           baseUrl: extractBaseUrl(entries),
           format: settings.format,
           navEvents: recorder.getNavEvents(),
+          parseJwt: settings.parseJwt,
           llm: { model: settings.model, apiKey: settings.apiKey },
         },
         (msg) => { statusBar.textContent = msg; }

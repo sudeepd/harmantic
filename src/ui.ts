@@ -107,6 +107,9 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
       <button class="btn" id="btn-settings" title="Settings">⚙</button>
       <button class="btn primary" id="btn-generate" disabled>Generate Tests</button>
     </div>
+    <div class="instructions-bar">
+      <textarea id="instructions" placeholder="Optional instructions for the LLM (e.g. &quot;ignore OIDC and auth calls, focus on workflow CRUD operations&quot;)" rows="2"></textarea>
+    </div>
     <div class="flow-list" id="flow-list">
       <div class="empty-state">
         <div>Press <strong>● Record</strong> then use your app</div>
@@ -165,6 +168,13 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
   settingFormat.value = settings.format;
   settingModel.value = settings.model;
   settingApiKey.value = settings.apiKey;
+
+  const instructionsEl = document.getElementById("instructions") as HTMLTextAreaElement;
+  instructionsEl.value = settings.instructions ?? "";
+  instructionsEl.addEventListener("change", async () => {
+    settings.instructions = instructionsEl.value;
+    await saveSettings({ instructions: instructionsEl.value });
+  });
 
   // Poll request count
   const countTimer = setInterval(() => {
@@ -267,6 +277,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
           baseUrl: extractBaseUrl(entries),
           format: settings.format,
           navEvents: recorder.getNavEvents(),
+          instructions: settings.instructions,
           llm: { model: settings.model, apiKey: settings.apiKey },
         },
         (msg) => { statusBar.textContent = msg; }

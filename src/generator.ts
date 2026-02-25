@@ -27,7 +27,7 @@ export async function generateTests(
 
   // Use LLM segmentation only when no user markers provided
   const segments = markers.length === 0
-    ? await segmentWithLlm(filtered, heuristic, config.llm, config.navEvents)
+    ? await segmentWithLlm(filtered, heuristic, config.llm, config.navEvents, config.instructions)
     : heuristic;
 
   // 3. Build flows with heuristic dependency detection
@@ -52,7 +52,7 @@ export async function generateTests(
 
   for (let i = 0; i < flows.length; i++) {
     log(`LLM enriching flow ${i + 1}/${flows.length}…`);
-    await detectDependenciesWithLlm(flows[i].steps, config.llm);
+    await detectDependenciesWithLlm(flows[i].steps, config.llm, config.instructions);
 
     // Nav events that occurred before the next flow starts
     const flowStart = flowStartTimes[i];
@@ -62,7 +62,7 @@ export async function generateTests(
       return t >= flowStart - 2000 && t < flowEnd;
     });
 
-    await enrichFlowWithLlm(flows[i], config.llm, flowNav);
+    await enrichFlowWithLlm(flows[i], config.llm, flowNav, config.instructions);
   }
 
   // 5. Render

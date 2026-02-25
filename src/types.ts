@@ -54,6 +54,7 @@ export interface GeneratorConfig {
   baseUrl: string;
   format: OutputFormat;
   navEvents: NavigationEvent[];
+  instructions?: string;
   llm?: {
     model: string;
     apiKey: string;

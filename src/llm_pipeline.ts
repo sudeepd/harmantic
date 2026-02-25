@@ -14,11 +14,12 @@ export async function segmentWithLlm(
   entries: HarEntry[],
   heuristicSegments: HarEntry[][],
   settings: LlmSettings,
-  navEvents: NavigationEvent[] = []
+  navEvents: NavigationEvent[] = [],
+  instructions?: string
 ): Promise<HarEntry[][]> {
   if (entries.length === 0) return heuristicSegments;
 
-  const prompt = buildSegmentationPrompt(entries, navEvents);
+  const prompt = withInstructions(buildSegmentationPrompt(entries, navEvents), instructions);
   let text: string;
   try {
     text = await complete(prompt, settings);
@@ -111,11 +112,12 @@ function applyBoundaries(entries: HarEntry[], boundaries: number[]): HarEntry[][
 
 export async function detectDependenciesWithLlm(
   steps: Step[],
-  settings: LlmSettings
+  settings: LlmSettings,
+  instructions?: string
 ): Promise<void> {
   if (steps.length < 2) return;
 
-  const prompt = buildDependencyPrompt(steps);
+  const prompt = withInstructions(buildDependencyPrompt(steps), instructions);
   let text: string;
   try {
     text = await complete(prompt, settings);
@@ -201,9 +203,10 @@ function parseDependencyResponse(text: string, steps: Step[]): Dependency[] {
 export async function enrichFlowWithLlm(
   flow: Flow,
   settings: LlmSettings,
-  navContext?: NavigationEvent[]
+  navContext?: NavigationEvent[],
+  instructions?: string
 ): Promise<void> {
-  const prompt = buildEnrichmentPrompt(flow, navContext);
+  const prompt = withInstructions(buildEnrichmentPrompt(flow, navContext), instructions);
   let text: string;
   try {
     text = await complete(prompt, settings);
@@ -256,4 +259,13 @@ function parseEnrichmentResponse(text: string): { name?: string; assertions?: st
     name: typeof obj.name === "string" ? obj.name : undefined,
     assertions: Array.isArray(obj.assertions) ? obj.assertions : undefined,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+function withInstructions(prompt: string, instructions?: string): string {
+  if (!instructions?.trim()) return prompt;
+  return `IMPORTANT USER INSTRUCTIONS — apply these to all decisions below:\n${instructions.trim()}\n\n---\n\n${prompt}`;
 }

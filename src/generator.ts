@@ -17,13 +17,16 @@ export async function generateTests(
   log("Filtering requests…");
   const filtered = filterEntries(entries);
 
+  if (!config.llm) throw new Error("LLM config required — set your API key in Settings (⚙)");
+
   // 2. Segment into flows
   log("Segmenting flows…");
   const heuristic = markers.length > 0
     ? segmentByMarkers(filtered, markers)
     : segmentHeuristic(filtered);
 
-  const segments = config.llm && markers.length === 0
+  // Use LLM segmentation only when no user markers provided
+  const segments = markers.length === 0
     ? await segmentWithLlm(filtered, heuristic, config.llm)
     : heuristic;
 
@@ -42,12 +45,10 @@ export async function generateTests(
   });
 
   // 4. LLM passes: dependency detection + enrichment
-  if (config.llm) {
-    for (let i = 0; i < flows.length; i++) {
-      log(`LLM enriching flow ${i + 1}/${flows.length}…`);
-      await detectDependenciesWithLlm(flows[i].steps, config.llm);
-      await enrichFlowWithLlm(flows[i], config.llm);
-    }
+  for (let i = 0; i < flows.length; i++) {
+    log(`LLM enriching flow ${i + 1}/${flows.length}…`);
+    await detectDependenciesWithLlm(flows[i].steps, config.llm);
+    await enrichFlowWithLlm(flows[i], config.llm);
   }
 
   // 5. Render

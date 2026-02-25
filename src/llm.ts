@@ -4,6 +4,15 @@ export interface LlmSettings {
 }
 
 /**
+ * Validate an API key by making a minimal real request.
+ * Throws with a human-readable message if invalid.
+ */
+export async function validateKey(settings: LlmSettings): Promise<void> {
+  // Use a cheap 1-token request just to confirm auth works
+  await complete("Reply with the single word: ok", { ...settings });
+}
+
+/**
  * Send a prompt to the configured LLM and return the response text.
  * Supports anthropic/* and openai/* model prefixes.
  */

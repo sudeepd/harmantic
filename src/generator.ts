@@ -1,4 +1,4 @@
-import type { HarEntry, FlowMarker, Flow, Step, GeneratorConfig } from "./types";
+import type { HarEntry, FlowMarker, Flow, Step, GeneratorConfig, NavigationEvent } from "./types";
 import { segmentByMarkers, segmentHeuristic } from "./segmentation";
 import { detectDependencies } from "./dependencies";
 import { segmentWithLlm, detectDependenciesWithLlm, enrichFlowWithLlm } from "./llm_pipeline";
@@ -27,7 +27,7 @@ export async function generateTests(
 
   // Use LLM segmentation only when no user markers provided
   const segments = markers.length === 0
-    ? await segmentWithLlm(filtered, heuristic, config.llm)
+    ? await segmentWithLlm(filtered, heuristic, config.llm, config.navEvents)
     : heuristic;
 
   // 3. Build flows with heuristic dependency detection
@@ -45,10 +45,24 @@ export async function generateTests(
   });
 
   // 4. LLM passes: dependency detection + enrichment
+  // Associate nav events with each flow by timestamp
+  const flowStartTimes = flows.map(f =>
+    new Date(f.steps[0]?.entry.startedDateTime ?? 0).getTime()
+  );
+
   for (let i = 0; i < flows.length; i++) {
     log(`LLM enriching flow ${i + 1}/${flows.length}…`);
     await detectDependenciesWithLlm(flows[i].steps, config.llm);
-    await enrichFlowWithLlm(flows[i], config.llm);
+
+    // Nav events that occurred before the next flow starts
+    const flowStart = flowStartTimes[i];
+    const flowEnd = flowStartTimes[i + 1] ?? Infinity;
+    const flowNav = config.navEvents.filter(ev => {
+      const t = new Date(ev.timestamp).getTime();
+      return t >= flowStart - 2000 && t < flowEnd;
+    });
+
+    await enrichFlowWithLlm(flows[i], config.llm, flowNav);
   }
 
   // 5. Render

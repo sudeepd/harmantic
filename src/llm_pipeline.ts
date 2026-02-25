@@ -1,8 +1,8 @@
 /**
  * LLM-powered passes for segmentation, dependency detection, and flow enrichment.
- * Each function gracefully falls back if the LLM call fails.
+ * Navigation events from the page observer are threaded through to enrich prompts.
  */
-import type { HarEntry, Step, Dependency, Flow } from "./types";
+import type { HarEntry, Step, Dependency, Flow, NavigationEvent } from "./types";
 import { complete, type LlmSettings } from "./llm";
 import { mergeDependencies } from "./dependencies";
 
@@ -10,18 +10,15 @@ import { mergeDependencies } from "./dependencies";
 // Segmentation
 // ---------------------------------------------------------------------------
 
-/**
- * Sliding-window LLM segmentation. Groups entries into semantically coherent flows.
- * Falls back to the provided heuristic segments on error.
- */
 export async function segmentWithLlm(
   entries: HarEntry[],
   heuristicSegments: HarEntry[][],
-  settings: LlmSettings
+  settings: LlmSettings,
+  navEvents: NavigationEvent[] = []
 ): Promise<HarEntry[][]> {
   if (entries.length === 0) return heuristicSegments;
 
-  const prompt = buildSegmentationPrompt(entries);
+  const prompt = buildSegmentationPrompt(entries, navEvents);
   let text: string;
   try {
     text = await complete(prompt, settings);
@@ -40,23 +37,49 @@ export async function segmentWithLlm(
   }
 }
 
-function buildSegmentationPrompt(entries: HarEntry[]): string {
-  const summary = entries.map((e, i) => {
-    const url = new URL(e.request.url);
-    return `${i}: ${e.request.method} ${url.pathname} -> ${e.response.status}`;
+function buildSegmentationPrompt(entries: HarEntry[], navEvents: NavigationEvent[]): string {
+  // Build a unified timeline interleaving nav events and requests by timestamp
+  type TimelineItem =
+    | { kind: "nav"; t: number; event: NavigationEvent }
+    | { kind: "req"; t: number; index: number; entry: HarEntry };
+
+  const timeline: TimelineItem[] = [
+    ...navEvents.map(ev => ({
+      kind: "nav" as const,
+      t: new Date(ev.timestamp).getTime(),
+      event: ev,
+    })),
+    ...entries.map((entry, index) => ({
+      kind: "req" as const,
+      t: new Date(entry.startedDateTime).getTime(),
+      index,
+      entry,
+    })),
+  ].sort((a, b) => a.t - b.t);
+
+  const lines = timeline.map(item => {
+    if (item.kind === "nav") {
+      const { pathname, title, headings } = item.event;
+      const ctx = [title, ...headings].filter(Boolean).slice(0, 3).join(" | ");
+      return `[NAV] → ${pathname}${ctx ? `  (${ctx})` : ""}`;
+    } else {
+      const url = new URL(item.entry.request.url);
+      return `[${item.index}] ${item.entry.request.method} ${url.pathname} → ${item.entry.response.status}`;
+    }
   }).join("\n");
 
-  return `You are analyzing HTTP traffic to identify logical test case boundaries.
+  return `You are analyzing browser activity to identify logical API test case boundaries.
 
-Here is a sequence of HTTP requests (index: METHOD path -> status):
+The timeline below interleaves page navigations [NAV] and HTTP requests [index]:
 
-${summary}
+${lines}
 
-Identify where new test flows begin. A new flow starts when:
-- The user begins a new independent task (e.g. creating a resource after listing others)
-- There is a clear semantic shift in what is being tested
+Rules for identifying flow boundaries:
+- A [NAV] event almost always signals a new test flow — the user moved to a different screen
+- A new flow also starts when there is a clear semantic shift (e.g. from listing to creating a resource)
+- Requests that are continuations of the same user action (e.g. follow-up GETs after a POST) belong to the same flow
 
-Return a JSON array of the indices where new flows begin (always include 0).
+Return a JSON array of the REQUEST indices (not NAV events) where new flows begin. Always include 0.
 Example: [0, 5, 12]
 
 Return ONLY the JSON array, no other text.`;
@@ -177,9 +200,10 @@ function parseDependencyResponse(text: string, steps: Step[]): Dependency[] {
 
 export async function enrichFlowWithLlm(
   flow: Flow,
-  settings: LlmSettings
+  settings: LlmSettings,
+  navContext?: NavigationEvent[]
 ): Promise<void> {
-  const prompt = buildEnrichmentPrompt(flow);
+  const prompt = buildEnrichmentPrompt(flow, navContext);
   let text: string;
   try {
     text = await complete(prompt, settings);
@@ -197,15 +221,19 @@ export async function enrichFlowWithLlm(
   }
 }
 
-function buildEnrichmentPrompt(flow: Flow): string {
+function buildEnrichmentPrompt(flow: Flow, navContext?: NavigationEvent[]): string {
   const steps = flow.steps.map((s, i) => {
     const url = new URL(s.entry.request.url);
     const resp = s.entry.response.content.text?.slice(0, 200) ?? "";
-    return `Step ${i}: ${s.entry.request.method} ${url.pathname} -> ${s.entry.response.status}${resp ? `\n  Response: ${resp}` : ""}`;
+    return `Step ${i}: ${s.entry.request.method} ${url.pathname} → ${s.entry.response.status}${resp ? `\n  Response: ${resp}` : ""}`;
   }).join("\n");
 
-  return `You are generating test metadata for an API test flow.
+  const pageCtx = navContext && navContext.length > 0
+    ? `\nPage context at start of flow:\n  URL: ${navContext[0].pathname}\n  Title: ${navContext[0].title}\n  Visible: ${navContext[0].headings.join(", ")}\n`
+    : "";
 
+  return `You are generating test metadata for an API test flow.
+${pageCtx}
 Steps:
 ${steps}
 
@@ -215,8 +243,8 @@ Return a JSON object with:
   "assertions": ["assert response_0.json()['active'] == True", "assert 'id' in response_1.json()"]
 }
 
-The name should describe the user intent (e.g. "create_workflow", "admin_user_login").
-Assertions should be valid Python using response_N variables.
+The name should reflect what the user was doing on screen (e.g. "create_workflow", "admin_login", "view_dashboard").
+Assertions should be valid Python expressions using response_N variables.
 Return ONLY the JSON object.`;
 }
 

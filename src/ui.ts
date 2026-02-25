@@ -174,7 +174,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
   }, 500);
 
   // Record
-  btnRecord.addEventListener("click", () => {
+  btnRecord.addEventListener("click", async () => {
     if (recorder.recording) {
       recorder.stop();
       btnRecord.textContent = "● Record";
@@ -182,11 +182,14 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
       btnMark.disabled = false;
       statusBar.textContent = `Stopped — ${recorder.entryCount} requests captured`;
     } else {
-      recorder.start();
+      btnRecord.setAttribute("disabled", "true");
+      statusBar.textContent = "Starting…";
+      await recorder.start();
+      btnRecord.removeAttribute("disabled");
       btnRecord.textContent = "■ Stop";
       btnRecord.classList.add("recording");
       btnMark.disabled = false;
-      statusBar.textContent = "Recording…";
+      statusBar.textContent = "Recording — page navigation and requests captured";
     }
   });
 
@@ -263,6 +266,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
         {
           baseUrl: extractBaseUrl(entries),
           format: settings.format,
+          navEvents: recorder.getNavEvents(),
           llm: { model: settings.model, apiKey: settings.apiKey },
         },
         (msg) => { statusBar.textContent = msg; }

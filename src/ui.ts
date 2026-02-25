@@ -1,4 +1,5 @@
 import type { Recorder } from "./recorder";
+import type { FlowMarker } from "./types";
 import { generateTests } from "./generator";
 import { loadSettings, saveSettings, isConfigured, type Settings } from "./settings";
 import { validateKey } from "./llm";
@@ -107,9 +108,6 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
       <button class="btn" id="btn-settings" title="Settings">⚙</button>
       <button class="btn primary" id="btn-generate" disabled>Generate Tests</button>
     </div>
-    <div class="instructions-bar">
-      <textarea id="instructions" placeholder="Optional instructions for the LLM (e.g. &quot;ignore OIDC and auth calls, focus on workflow CRUD operations&quot;)" rows="2"></textarea>
-    </div>
     <div class="flow-list" id="flow-list">
       <div class="empty-state">
         <div>Press <strong>● Record</strong> then use your app</div>
@@ -169,12 +167,6 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
   settingModel.value = settings.model;
   settingApiKey.value = settings.apiKey;
 
-  const instructionsEl = document.getElementById("instructions") as HTMLTextAreaElement;
-  instructionsEl.value = settings.instructions ?? "";
-  instructionsEl.addEventListener("change", async () => {
-    settings.instructions = instructionsEl.value;
-    await saveSettings({ instructions: instructionsEl.value });
-  });
 
   // Poll request count
   const countTimer = setInterval(() => {
@@ -190,7 +182,8 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
       btnRecord.textContent = "● Record";
       btnRecord.classList.remove("recording");
       btnMark.disabled = false;
-      statusBar.textContent = `Stopped — ${recorder.entryCount} requests captured`;
+      if (recorder.getMarkers().length > 0) renderMarkers(flowList, recorder.getMarkers());
+      statusBar.textContent = `Stopped — ${recorder.entryCount} requests captured. Add flow notes then Generate Tests.`;
     } else {
       btnRecord.setAttribute("disabled", "true");
       statusBar.textContent = "Starting…";
@@ -277,7 +270,6 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
           baseUrl: extractBaseUrl(entries),
           format: settings.format,
           navEvents: recorder.getNavEvents(),
-          instructions: settings.instructions,
           llm: { model: settings.model, apiKey: settings.apiKey },
         },
         (msg) => { statusBar.textContent = msg; }
@@ -298,13 +290,30 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function renderMarkers(container: HTMLElement, markers: { label: string }[]) {
-  container.innerHTML = markers.map(m => `
-    <div class="flow-item">
-      <span class="flow-name">${m.label}</span>
-      <span class="flow-meta">flow marker</span>
+function renderMarkers(container: HTMLElement, markers: FlowMarker[]) {
+  if (markers.length === 0) return;
+  container.innerHTML = markers.map((m, i) => `
+    <div class="flow-item" data-index="${i}">
+      <div class="flow-item-header">
+        <span class="flow-name">${m.label}</span>
+        <span class="flow-meta">${m.index} requests</span>
+      </div>
+      <textarea
+        class="flow-notes"
+        data-marker="${i}"
+        placeholder="Instructions for this flow (e.g. ignore OIDC calls, the POST id chains into the PATCH)"
+        rows="2"
+      >${m.notes ?? ""}</textarea>
     </div>
   `).join("");
+
+  // Wire up note changes back into the markers array
+  container.querySelectorAll<HTMLTextAreaElement>(".flow-notes").forEach(ta => {
+    ta.addEventListener("change", () => {
+      const idx = Number(ta.dataset.marker);
+      markers[idx].notes = ta.value.trim() || undefined;
+    });
+  });
 }
 
 function extractBaseUrl(entries: { request: { url: string } }[]): string {

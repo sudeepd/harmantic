@@ -2,14 +2,12 @@ export interface Settings {
   model: string;
   apiKey: string;
   format: "pytest" | "jest" | "playwright";
-  instructions: string;
 }
 
 const DEFAULTS: Settings = {
   model: "anthropic/claude-sonnet-4-20250514",
   apiKey: "",
   format: "pytest",
-  instructions: "",
 };
 
 export async function loadSettings(): Promise<Settings> {

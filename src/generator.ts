@@ -37,6 +37,7 @@ export async function generateTests(
     detectDependencies(steps);
     return {
       name: markers[i]?.label ?? `flow_${i + 1}`,
+      notes: markers[i]?.notes,
       steps,
       requiresAuth: steps.some(s =>
         s.entry.request.headers.some(h => h.name.toLowerCase() === "authorization")
@@ -52,7 +53,7 @@ export async function generateTests(
 
   for (let i = 0; i < flows.length; i++) {
     log(`LLM enriching flow ${i + 1}/${flows.length}…`);
-    await detectDependenciesWithLlm(flows[i].steps, config.llm, config.instructions);
+    await detectDependenciesWithLlm(flows[i].steps, config.llm, flows[i].notes);
 
     // Nav events that occurred before the next flow starts
     const flowStart = flowStartTimes[i];
@@ -62,7 +63,7 @@ export async function generateTests(
       return t >= flowStart - 2000 && t < flowEnd;
     });
 
-    await enrichFlowWithLlm(flows[i], config.llm, flowNav, config.instructions);
+    await enrichFlowWithLlm(flows[i], config.llm, flowNav, flows[i].notes);
   }
 
   // 5. Render

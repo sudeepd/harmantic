@@ -25,6 +25,7 @@ export interface HarEntry {
 export interface FlowMarker {
   index: number;      // entry index where marker was dropped
   label: string;
+  notes?: string;     // per-flow instructions to the LLM
 }
 
 export interface Dependency {
@@ -43,6 +44,7 @@ export interface Step {
 
 export interface Flow {
   name: string;
+  notes?: string;     // per-flow LLM instructions from the user
   steps: Step[];
   requiresAuth: boolean;
   llmAssertions?: string[];
@@ -54,7 +56,6 @@ export interface GeneratorConfig {
   baseUrl: string;
   format: OutputFormat;
   navEvents: NavigationEvent[];
-  instructions?: string;
   llm?: {
     model: string;
     apiKey: string;

@@ -1,42 +1,57 @@
 import type { HarEntry, FlowMarker, Flow, Step, GeneratorConfig } from "./types";
 import { segmentByMarkers, segmentHeuristic } from "./segmentation";
 import { detectDependencies } from "./dependencies";
+import { segmentWithLlm, detectDependenciesWithLlm, enrichFlowWithLlm } from "./llm_pipeline";
 import { renderPytest } from "./renderers/pytest";
 import { renderJest } from "./renderers/jest";
 
 export async function generateTests(
   entries: HarEntry[],
   markers: FlowMarker[],
-  config: GeneratorConfig
+  config: GeneratorConfig,
+  onProgress?: (msg: string) => void
 ): Promise<string> {
-  // 1. Filter noise (images, fonts, analytics, etc.)
+  const log = onProgress ?? (() => {});
+
+  // 1. Filter noise
+  log("Filtering requests…");
   const filtered = filterEntries(entries);
 
   // 2. Segment into flows
-  const segments = markers.length > 0
+  log("Segmenting flows…");
+  const heuristic = markers.length > 0
     ? segmentByMarkers(filtered, markers)
     : segmentHeuristic(filtered);
 
-  // 3. Build flows with dependency detection
-  const flows: Flow[] = segments.map((entries, i) => {
-    const steps: Step[] = entries.map((entry, j) => ({
-      index: j,
-      entry,
-      dependencies: [],
-    }));
+  const segments = config.llm && markers.length === 0
+    ? await segmentWithLlm(filtered, heuristic, config.llm)
+    : heuristic;
+
+  // 3. Build flows with heuristic dependency detection
+  log("Detecting dependencies…");
+  const flows: Flow[] = segments.map((seg, i) => {
+    const steps: Step[] = seg.map((entry, j) => ({ index: j, entry, dependencies: [] }));
     detectDependencies(steps);
     return {
       name: markers[i]?.label ?? `flow_${i + 1}`,
       steps,
       requiresAuth: steps.some(s =>
-        s.entry.request.headers.some(h =>
-          h.name.toLowerCase() === "authorization"
-        )
+        s.entry.request.headers.some(h => h.name.toLowerCase() === "authorization")
       ),
     };
   });
 
-  // 4. Render
+  // 4. LLM passes: dependency detection + enrichment
+  if (config.llm) {
+    for (let i = 0; i < flows.length; i++) {
+      log(`LLM enriching flow ${i + 1}/${flows.length}…`);
+      await detectDependenciesWithLlm(flows[i].steps, config.llm);
+      await enrichFlowWithLlm(flows[i], config.llm);
+    }
+  }
+
+  // 5. Render
+  log("Rendering test file…");
   switch (config.format) {
     case "jest":
     case "playwright":
@@ -48,18 +63,16 @@ export async function generateTests(
 }
 
 function filterEntries(entries: HarEntry[]): HarEntry[] {
-  const NOISE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|css|js|map)$/i;
+  const NOISE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|map)(\?.*)?$/i;
   const NOISE_DOMAINS = /google-analytics|googletagmanager|hotjar|intercom|segment\.io/i;
-  const API_CONTENT_TYPES = /json|xml|form/i;
 
   return entries.filter(e => {
     const url = e.request.url;
     if (NOISE_EXTENSIONS.test(url)) return false;
     if (NOISE_DOMAINS.test(url)) return false;
-    const ct = e.response.content.mimeType ?? "";
-    const reqCt = e.request.postData?.mimeType ?? "";
-    // Keep if response or request looks like API traffic, or status is interesting
-    return API_CONTENT_TYPES.test(ct) || API_CONTENT_TYPES.test(reqCt)
-      || e.response.status >= 200;
+    // Drop pure static asset fetches (CSS/JS) only if they have no interesting status
+    const isCssJs = /\.(css|js)(\?.*)?$/.test(url);
+    if (isCssJs && e.response.status === 200) return false;
+    return true;
   });
 }

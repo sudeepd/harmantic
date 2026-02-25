@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: "Harmantic",
     description: "Record browser sessions and generate API tests",
-    permissions: ["declarativeNetRequest"],
+    permissions: ["storage"],
     host_permissions: ["<all_urls>"],
   },
 });

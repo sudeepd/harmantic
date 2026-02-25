@@ -37,6 +37,7 @@ export interface Flow {
   name: string;
   steps: Step[];
   requiresAuth: boolean;
+  llmAssertions?: string[];
 }
 
 export type OutputFormat = "pytest" | "jest" | "playwright";
@@ -44,6 +45,8 @@ export type OutputFormat = "pytest" | "jest" | "playwright";
 export interface GeneratorConfig {
   baseUrl: string;
   format: OutputFormat;
-  llmModel?: string;
-  llmApiKey?: string;
+  llm?: {
+    model: string;
+    apiKey: string;
+  };
 }

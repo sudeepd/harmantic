@@ -1,4 +1,4 @@
-import type { Step, Dependency } from "./types";
+import type { HarEntry, Step, Dependency } from "./types";
 
 const MIN_ID_LENGTH = 6;
 
@@ -7,30 +7,45 @@ const MIN_ID_LENGTH = 6;
  * Mirrors the Python flow_analyzer logic.
  */
 export function detectDependencies(steps: Step[]): void {
-  // Registry: value -> (stepIndex, jsonPath)
   const registry = new Map<string, { stepIndex: number; path: string }>();
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const entry = step.entry;
 
-    // Check if any registry value appears in this request
     const reqText = JSON.stringify(entry.request);
     for (const [value, source] of registry.entries()) {
       if (source.stepIndex >= i) continue;
       if (reqText.includes(value)) {
-        step.dependencies.push({
+        const dep: Dependency = {
           sourceStepIndex: source.stepIndex,
           targetStepIndex: i,
           targetKey: inferTargetKey(entry, value),
           extractedFrom: source.path,
           variableName: pathToVarName(source.path, source.stepIndex),
-        });
+        };
+        const key = `${dep.sourceStepIndex}:${dep.targetStepIndex}:${dep.targetKey}`;
+        if (!step.dependencies.some(d => `${d.sourceStepIndex}:${d.targetStepIndex}:${d.targetKey}` === key)) {
+          step.dependencies.push(dep);
+        }
       }
     }
 
-    // Register values from this response
     collectResponseValues(entry, i, registry);
+  }
+}
+
+/**
+ * Merge LLM-detected dependencies into existing heuristic ones, deduplicating.
+ */
+export function mergeDependencies(steps: Step[], llmDeps: Dependency[]): void {
+  for (const dep of llmDeps) {
+    const target = steps[dep.targetStepIndex];
+    if (!target) continue;
+    const key = `${dep.sourceStepIndex}:${dep.targetStepIndex}:${dep.targetKey}`;
+    if (!target.dependencies.some(d => `${d.sourceStepIndex}:${d.targetStepIndex}:${d.targetKey}` === key)) {
+      target.dependencies.push(dep);
+    }
   }
 }
 
@@ -39,7 +54,6 @@ function collectResponseValues(
   stepIndex: number,
   registry: Map<string, { stepIndex: number; path: string }>
 ) {
-  // Location header (e.g. 201 Created)
   for (const h of entry.response.headers) {
     if (h.name.toLowerCase() === "location" && h.value) {
       const segment = h.value.replace(/\/$/, "").split("/").pop() ?? "";
@@ -49,7 +63,6 @@ function collectResponseValues(
     }
   }
 
-  // Response body JSON fields
   const bodyText = entry.response.content.text;
   if (!bodyText) return;
   try {
@@ -95,10 +108,7 @@ function looksLikeId(value: string): boolean {
 }
 
 function inferTargetKey(entry: HarEntry, value: string): string {
-  // Try to find which part of the URL or body contains the value
-  const url = entry.request.url;
-  const urlParts = url.split("/");
-  for (const part of urlParts) {
+  for (const part of entry.request.url.split("/")) {
     if (part === value) return "url_path";
   }
   return "body";
@@ -107,11 +117,8 @@ function inferTargetKey(entry: HarEntry, value: string): string {
 function pathToVarName(path: string, stepIndex: number): string {
   const base = path
     .replace(/^header\./, "header_")
-    .replace(/[.\[\]]/g, "_")
+    .replace(/[.[\]]/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
   return `step${stepIndex}_${base}`;
 }
-
-// Re-export HarEntry type for internal use
-import type { HarEntry } from "./types";

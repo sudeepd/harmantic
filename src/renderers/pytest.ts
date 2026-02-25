@@ -12,8 +12,7 @@ export function renderPytest(flows: Flow[], config: GeneratorConfig): string {
     "",
   ];
 
-  const hasAuth = flows.some(f => f.requiresAuth);
-  if (hasAuth) {
+  if (flows.some(f => f.requiresAuth)) {
     lines.push(
       "@pytest.fixture(scope='session')",
       "def auth_token():",
@@ -46,43 +45,42 @@ function renderFlow(flow: Flow): string[] {
     `def test_${sanitizeName(flow.name)}(${params.join(", ")}):`,
   ];
 
-  // Track extracted variables
-  const extracted = new Map<string, string>(); // varName -> expression
+  // All deps across the flow, keyed by source step
+  const allDeps = flow.steps.flatMap(s => s.dependencies);
 
   for (const step of flow.steps) {
     const entry = step.entry;
-    const url = stripBase(entry.request.url, "");
     const method = entry.request.method.toLowerCase();
     const varName = `response_${step.index}`;
 
-    // Build headers
     const headers = buildHeaders(entry.request.headers, flow.requiresAuth);
-
-    // Build body
     const body = entry.request.postData?.text
       ? `json=${safeJson(entry.request.postData.text)}`
       : null;
 
-    // Substitute dependency variables into URL
-    let urlExpr = buildUrl(url, step, extracted);
-
-    const args = [`"${urlExpr}"`];
+    const urlExpr = buildUrl(entry.request.url, step);
+    const args = [urlExpr.startsWith("f\"") ? urlExpr : `"${urlExpr}"`];
     if (headers) args.push(`headers=${headers}`);
     if (body) args.push(body);
 
     lines.push(`    ${varName} = client.${method}(${args.join(", ")})`);
     lines.push(`    assert ${varName}.status_code == ${entry.response.status}`);
 
-    // Extract values for downstream steps
-    for (const dep of flow.steps.flatMap(s => s.dependencies).filter(d => d.sourceStepIndex === step.index)) {
-      const extractedVar = dep.variableName;
-      if (dep.extractedFrom === "header.Location") {
-        lines.push(`    ${extractedVar} = ${varName}.headers["Location"].rstrip("/").rsplit("/", 1)[-1]`);
-      } else {
-        const jsonPath = dep.extractedFrom.replace(/^body\./, "");
-        lines.push(`    ${extractedVar} = ${varName}.json()["${jsonPath}"]`);
+    // LLM assertions for this step
+    for (const assertion of (flow.llmAssertions ?? [])) {
+      if (assertion.includes(varName)) {
+        lines.push(`    ${assertion}`);
       }
-      extracted.set(extractedVar, extractedVar);
+    }
+
+    // Extract values for downstream steps
+    for (const dep of allDeps.filter(d => d.sourceStepIndex === step.index)) {
+      if (dep.extractedFrom === "header.Location") {
+        lines.push(`    ${dep.variableName} = ${varName}.headers["Location"].rstrip("/").rsplit("/", 1)[-1]`);
+      } else {
+        const path = dep.extractedFrom.replace(/^body\./, "");
+        lines.push(`    ${dep.variableName} = ${varName}.json()["${path}"]`);
+      }
     }
 
     lines.push("");
@@ -91,42 +89,31 @@ function renderFlow(flow: Flow): string[] {
   return lines;
 }
 
-function buildUrl(url: string, step: Step, extracted: Map<string, string>): string {
-  let result = url;
+function buildUrl(rawUrl: string, step: Step): string {
+  let path: string;
+  try { path = new URL(rawUrl).pathname + new URL(rawUrl).search; } catch { path = rawUrl; }
+
   for (const dep of step.dependencies) {
-    if (dep.extractedFrom !== "header.Location") continue;
-    const segment = result.split("/").find(p => p.length >= 6 && /[\d\-]/.test(p));
-    if (segment) result = result.replace(segment, `{${dep.variableName}}`);
+    const segment = path.split("/").find(p => p.length >= 6 && /[\d\-]/.test(p));
+    if (segment) path = path.replace(segment, `{${dep.variableName}}`);
   }
-  // Return as f-string if substitutions were made
-  if (result.includes("{")) return `f"${result}"`;
-  return result;
+  return path.includes("{") ? `f"${path}"` : path;
 }
 
-function buildHeaders(
-  headers: Array<{ name: string; value: string }>,
-  requiresAuth: boolean
-): string | null {
+function buildHeaders(headers: Array<{ name: string; value: string }>, requiresAuth: boolean): string | null {
   const keep = headers.filter(h => {
     const n = h.name.toLowerCase();
     return n === "content-type" || n === "accept";
   });
-  if (requiresAuth) {
-    keep.push({ name: "Authorization", value: "Bearer {auth_token}" });
-  }
+  if (requiresAuth) keep.push({ name: "Authorization", value: "Bearer {auth_token}" });
   if (keep.length === 0) return null;
-  const obj = Object.fromEntries(keep.map(h => [h.name, h.value]));
-  return JSON.stringify(obj);
+  return JSON.stringify(Object.fromEntries(keep.map(h => [h.name, h.value])));
 }
 
 function safeJson(text: string): string {
-  try { JSON.parse(text); return text; } catch { return `"${text.replace(/"/g, '\\"')}"` }
+  try { JSON.parse(text); return text; } catch { return JSON.stringify(text); }
 }
 
 function sanitizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-}
-
-function stripBase(url: string, base: string): string {
-  try { return new URL(url).pathname + new URL(url).search; } catch { return url; }
 }

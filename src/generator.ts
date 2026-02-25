@@ -1,6 +1,7 @@
 import type { HarEntry, FlowMarker, Flow, Step, GeneratorConfig, NavigationEvent } from "./types";
 import { segmentByMarkers, segmentHeuristic } from "./segmentation";
 import { detectDependencies } from "./dependencies";
+import { detectCrossFlowDeps } from "./cross_flow";
 import { segmentWithLlm, detectDependenciesWithLlm, enrichFlowWithLlm } from "./llm_pipeline";
 import { renderPytest } from "./renderers/pytest";
 import { renderJest } from "./renderers/jest";
@@ -45,7 +46,11 @@ export async function generateTests(
     };
   });
 
-  // 4. LLM passes: dependency detection + enrichment
+  // 4. Cross-flow dependency detection
+  log("Detecting cross-flow dependencies…");
+  detectCrossFlowDeps(flows);
+
+  // 5. LLM passes: dependency detection + enrichment
   // Associate nav events with each flow by timestamp
   const flowStartTimes = flows.map(f =>
     new Date(f.steps[0]?.entry.startedDateTime ?? 0).getTime()

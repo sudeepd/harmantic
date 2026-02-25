@@ -42,12 +42,23 @@ export interface Step {
   dependencies: Dependency[];
 }
 
+// A value produced by one flow and consumed by another
+export interface CrossFlowDep {
+  stateKey: string;           // key in session_state dict, e.g. "workflow_id"
+  producedByFlow: number;     // flow index
+  producedByStep: number;     // step index within that flow
+  extractedFrom: string;      // e.g. "header.Location" or "body.id"
+  consumedByFlow: number;     // flow index
+  consumedByStep: number;     // step index within that flow
+}
+
 export interface Flow {
   name: string;
-  notes?: string;     // per-flow LLM instructions from the user
+  notes?: string;             // per-flow LLM instructions from the user
   steps: Step[];
   requiresAuth: boolean;
   llmAssertions?: string[];
+  crossFlowDeps?: CrossFlowDep[];  // deps on other flows (populated after all flows built)
 }
 
 export type OutputFormat = "pytest" | "jest" | "playwright";

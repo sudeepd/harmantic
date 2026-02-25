@@ -170,7 +170,7 @@ function renderMain(root: HTMLElement, recorder: Recorder, settings: Settings) {
   const countTimer = setInterval(() => {
     const n = recorder.entryCount;
     badgeCount.textContent = `${n} requests`;
-    btnGenerate.disabled = n === 0;
+    btnGenerate.disabled = n === 0 || recorder.recording;
   }, 500);
 
   // Record
